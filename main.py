@@ -2,7 +2,7 @@ from telegram import Update, Poll
 from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
 import os
 
-TOKEN = os.getenv("8014250953:AAHQ2YZs3IJHPgZCY-ZsHH9CSrYRf30ZK_k")
+TOKEN = os.getenv("TOKEN")
 
 def parse_quiz(text):
     lines = text.strip().split("\n")
@@ -46,7 +46,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Send your quiz with ✅ on the correct option!")
 
 def main():
-    app = Application.builder().token(8014250953:AAHQ2YZs3IJHPgZCY-ZsHH9CSrYRf30ZK_k).build()
+    app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
