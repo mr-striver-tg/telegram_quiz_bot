@@ -1,82 +1,55 @@
-import re
+from telegram import Update, Poll
+from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
 import os
-import asyncio
-from telegram import Poll, Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-from dotenv import load_dotenv
 
-load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
-# Max limits by Telegram API
-MAX_OPTION_LENGTH = 100
-MAX_QUESTION_LENGTH = 300
-MAX_EXPLANATION_LENGTH = 200
+def parse_quiz(text):
+    lines = text.strip().split("\n")
+    question = lines[0].strip()
+    options = []
+    correct_index = -1
+    explanation = ""
 
-# Parses quiz blocks with ✅ marked correct answers
-def parse_quiz_blocks(text):
-    blocks = text.strip().split('\n\n')
-    quizzes = []
-
-    for block in blocks:
-        lines = block.strip().split('\n')
-        if len(lines) < 6:
+    for line in lines[1:]:
+        line = line.strip()
+        if line.startswith("Ex:"):
+            explanation = line
             continue
+        if "✅" in line:
+            clean_line = line.replace("✅", "").strip()
+            options.append(clean_line)
+            correct_index = len(options) - 1
+        else:
+            options.append(line.strip())
 
-        question = lines[0].strip()[:MAX_QUESTION_LENGTH]
-        options = []
-        correct_option_id = -1
+    return question, options, correct_index, explanation
 
-        for idx, line in enumerate(lines[1:5]):
-            opt = line.replace("️", "").strip()
-            if "✅" in opt:
-                opt = opt.replace("✅", "").strip()
-                correct_option_id = idx
-            # Truncate to 100 characters
-            options.append(opt[:MAX_OPTION_LENGTH])
-
-        # Explanation
-        explanation_line = next((line for line in lines if line.startswith("Ex:")), "Ex: No explanation")
-        explanation_line = explanation_line.strip()[:MAX_EXPLANATION_LENGTH]
-
-        # Validate parsed quiz
-        if len(options) == 4 and correct_option_id != -1:
-            quizzes.append({
-                "question": question,
-                "options": options,
-                "correct_option_id": correct_option_id,
-                "explanation": explanation_line
-            })
-
-    return quizzes
-
-# Telegram handler
-async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    quiz_list = parse_quiz_blocks(text)
+    question, options, correct_index, explanation = parse_quiz(text)
 
-    if not quiz_list:
-        await update.message.reply_text("❌ Could not parse any valid quizzes.")
+    if correct_index == -1:
+        await update.message.reply_text("❌ No correct answer found (✅ missing).")
         return
 
-    for quiz in quiz_list[:15]:  # Send up to 15 questions
-        try:
-            await context.bot.send_poll(
-                chat_id=update.effective_chat.id,
-                question=quiz["question"],
-                options=quiz["options"],
-                type=Poll.QUIZ,
-                correct_option_id=quiz["correct_option_id"],
-                explanation=quiz["explanation"],
-                is_anonymous=False
-            )
-            await asyncio.sleep(2)  # Delay to avoid rate limiting
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ Failed to send a quiz: {str(e)}")
+    await update.message.reply_poll(
+        question=question,
+        options=options,
+        type=Poll.QUIZ,
+        correct_option_id=correct_index,
+        explanation=explanation,
+        is_anonymous=False
+    )
 
-# Entry point
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), quiz_handler))
-    print("✅ Bot is running...")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Send your quiz with ✅ on the correct option!")
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
