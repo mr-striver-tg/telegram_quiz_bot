@@ -1,21 +1,19 @@
+import os
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater,
+    ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    CallbackContext,
+    ContextTypes,
 )
-import logging
 
-# Enable logging
+# Set up logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# Replace with your bot token
-TOKEN = "8014250953:AAHQ2YZs3IJHPgZCY-ZsHH9CSrYRf30ZK_kE"
 
 # Sample quiz questions
 standard_questions = [
@@ -34,63 +32,57 @@ anonymous_questions = [
     }
 ]
 
-# Start command with menu
-def start(update: Update, context: CallbackContext):
+# /start command with buttons
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Standard Quiz", callback_data='standard')],
         [InlineKeyboardButton("Anonymous Quiz", callback_data='anonymous')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("Choose a quiz mode:", reply_markup=reply_markup)
+    await update.message.reply_text("Choose a quiz mode:", reply_markup=reply_markup)
 
-# Handle button selection
-def button(update: Update, context: CallbackContext):
+# Callback button handler
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
 
     if query.data == "standard":
-        send_standard_quiz(query, context)
+        await send_quiz(query, context, is_anonymous=False)
     elif query.data == "anonymous":
-        send_anonymous_quiz(query, context)
+        await send_quiz(query, context, is_anonymous=True)
 
-# Standard quiz logic
-def send_standard_quiz(query, context: CallbackContext):
-    question = standard_questions[0]
-    context.bot.send_poll(
-        chat_id=query.message.chat_id,
-        question=question["question"],
-        options=question["options"],
-        type='quiz',
-        correct_option_id=question["correct_option_id"],
-        is_anonymous=False
-    )
+# Shared quiz sending function
+async def send_quiz(query, context: ContextTypes.DEFAULT_TYPE, is_anonymous: bool):
+    quiz_list = anonymous_questions if is_anonymous else standard_questions
+    quiz = quiz_list[0]
 
-# Anonymous quiz logic
-def send_anonymous_quiz(query, context: CallbackContext):
-    question = anonymous_questions[0]
-    context.bot.send_poll(
+    await context.bot.send_poll(
         chat_id=query.message.chat_id,
-        question=question["question"],
-        options=question["options"],
-        type='quiz',
-        correct_option_id=question["correct_option_id"],
-        is_anonymous=True
+        question=quiz["question"],
+        options=quiz["options"],
+        type="quiz",
+        correct_option_id=quiz["correct_option_id"],
+        is_anonymous=is_anonymous
     )
 
 # Error logging
-def error(update: Update, context: CallbackContext):
-    logger.warning('Update "%s" caused error "%s"', update, context.error)
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("Exception while handling update:", exc_info=context.error)
 
+# Main application
 def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+    token = os.getenv("TOKEN")
+    if not token:
+        raise ValueError("TOKEN environment variable not set")
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CallbackQueryHandler(button))
-    dp.add_error_handler(error)
+    app = ApplicationBuilder().token(token).build()
 
-    updater.start_polling()
-    updater.idle()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_error_handler(error_handler)
 
-if __name__ == '__main__':
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
     main()
