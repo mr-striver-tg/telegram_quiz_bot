@@ -17,77 +17,84 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# To track mode per user
+# User quiz mode tracker
 user_mode = {}
 
-# Start command
+# /start menu
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Standard Quiz", callback_data='standard')],
         [InlineKeyboardButton("Anonymous Quiz", callback_data='anonymous')],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Choose a quiz mode:", reply_markup=reply_markup)
+    await update.message.reply_text("Choose a quiz mode:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Button clicks
+# Handle button click
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = query.from_user.id
-    if query.data == "standard":
-        user_mode[user_id] = False
-        await query.edit_message_text("📘 Standard quiz mode activated.\nNow send your question in the proper format.")
-    elif query.data == "anonymous":
-        user_mode[user_id] = True
-        await query.edit_message_text("🕵️ Anonymous quiz mode activated.\nNow send your question in the proper format.")
-
-# Parse message and create quiz
-async def handle_quiz_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    message = update.message.text
-
-    if not message or '✅' not in message or 'Ex:' not in message:
-        return
-
-    # Split question and explanation
-    try:
-        question_part, explanation = message.strip().rsplit("Ex:", 1)
-    except ValueError:
-        return
-
-    lines = [line.strip("️ ").strip() for line in question_part.strip().split('\n') if line.strip()]
-    
-    if len(lines) < 5:
-        return  # Expect at least: question + 4 options
-
-    question = lines[0]
-    options = []
-    correct_option_id = None
-
-    for idx, option in enumerate(lines[1:]):
-        if "✅" in option:
-            correct_option_id = idx
-            option = option.replace("✅", "").strip()
-        options.append(option)
-
-    if correct_option_id is None or len(options) < 2 or len(options) > 10:
-        await update.message.reply_text("❌ Invalid quiz format or missing correct answer.")
-        return
-
-    is_anonymous = user_mode.get(user_id, False)
-
-    await context.bot.send_poll(
-        chat_id=update.message.chat_id,
-        question=question,
-        options=options,
-        type="quiz",
-        correct_option_id=correct_option_id,
-        explanation=explanation.strip(),
-        is_anonymous=is_anonymous
+    user_mode[user_id] = query.data == "anonymous"
+    await query.edit_message_text(
+        "🟢 Anonymous mode ON." if user_mode[user_id] else "🔵 Standard mode ON.\nNow send your question(s)."
     )
 
-# Main setup
+# Handle quiz input (multiple questions supported)
+async def handle_quiz_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    is_anonymous = user_mode.get(user_id, False)
+    text = update.message.text
+
+    if not text or '✅' not in text or 'Ex:' not in text:
+        return
+
+    # Split by each "Ex:" block, assuming one per quiz
+    raw_blocks = re.split(r'\n?Ex:\s*', text.strip())
+    quizzes = []
+
+    for i in range(len(raw_blocks) - 1):  # last part is explanation of the last quiz
+        quiz_text = raw_blocks[i].strip()
+        explanation = raw_blocks[i + 1].split('\n')[0].strip()  # pick first line of explanation
+
+        lines = [line.strip("️ ").strip() for line in quiz_text.strip().split('\n') if line.strip()]
+        if len(lines) < 5:
+            continue  # invalid
+
+        question = lines[0]
+        options = []
+        correct_option_id = None
+
+        for idx, option in enumerate(lines[1:]):
+            if "✅" in option:
+                correct_option_id = idx
+                option = option.replace("✅", "").strip()
+            options.append(option)
+
+        if correct_option_id is None or len(options) < 2 or len(options) > 10:
+            continue
+
+        quizzes.append({
+            "question": question,
+            "options": options,
+            "correct_option_id": correct_option_id,
+            "explanation": explanation
+        })
+
+    if not quizzes:
+        await update.message.reply_text("❌ Couldn’t parse any valid quiz. Make sure your format is correct.")
+        return
+
+    for quiz in quizzes:
+        await context.bot.send_poll(
+            chat_id=update.message.chat_id,
+            question=quiz["question"],
+            options=quiz["options"],
+            type="quiz",
+            correct_option_id=quiz["correct_option_id"],
+            explanation=quiz["explanation"],
+            is_anonymous=is_anonymous
+        )
+
+# Main function
 def main():
     token = os.getenv("TOKEN")
     if not token:
@@ -99,7 +106,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_quiz_submission))
 
-    print("Bot running...")
+    print("🤖 Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
