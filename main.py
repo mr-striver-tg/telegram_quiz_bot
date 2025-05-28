@@ -11,16 +11,17 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# User quiz mode tracker
+# Dictionary to track user modes
 user_mode = {}
 
-# /start menu
+# /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Standard Quiz", callback_data='standard')],
@@ -28,17 +29,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("Choose a quiz mode:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Handle button click
+# Callback query handler for mode selection
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     user_mode[user_id] = query.data == "anonymous"
-    await query.edit_message_text(
-        "🟢 Anonymous mode ON." if user_mode[user_id] else "🔵 Standard mode ON.\nNow send your question(s)."
-    )
+    mode_text = "🟢 Anonymous mode ON." if user_mode[user_id] else "🔵 Standard mode ON."
+    await query.edit_message_text(f"{mode_text}\nNow send your question(s).")
 
-# Handle quiz input (multiple questions supported)
+# Message handler to process quiz submissions
 async def handle_quiz_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     is_anonymous = user_mode.get(user_id, False)
@@ -47,17 +47,19 @@ async def handle_quiz_submission(update: Update, context: ContextTypes.DEFAULT_T
     if not text or '✅' not in text or 'Ex:' not in text:
         return
 
-    # Split by each "Ex:" block, assuming one per quiz
-    raw_blocks = re.split(r'\n?Ex:\s*', text.strip())
-    quizzes = []
+    # Regular expression to extract quiz blocks
+    quiz_blocks = re.findall(
+        r"(.*?(?:\n.*?){4,5})\s*Ex:\s*(.+?)(?=\n(?:\n|.*?Ex:)|$)",
+        text.strip(),
+        re.DOTALL
+    )
 
-    for i in range(len(raw_blocks) - 1):  # last part is explanation of the last quiz
-        quiz_text = raw_blocks[i].strip()
-        explanation = raw_blocks[i + 1].split('\n')[0].strip()  # pick first line of explanation
+    parsed_quizzes = []
 
-        lines = [line.strip("️ ").strip() for line in quiz_text.strip().split('\n') if line.strip()]
+    for block, explanation in quiz_blocks:
+        lines = [line.strip("️ ").strip() for line in block.strip().split("\n") if line.strip()]
         if len(lines) < 5:
-            continue  # invalid
+            continue
 
         question = lines[0]
         options = []
@@ -69,21 +71,20 @@ async def handle_quiz_submission(update: Update, context: ContextTypes.DEFAULT_T
                 option = option.replace("✅", "").strip()
             options.append(option)
 
-        if correct_option_id is None or len(options) < 2 or len(options) > 10:
-            continue
+        if correct_option_id is not None:
+            parsed_quizzes.append({
+                "question": question,
+                "options": options,
+                "correct_option_id": correct_option_id,
+                "explanation": explanation.strip()
+            })
 
-        quizzes.append({
-            "question": question,
-            "options": options,
-            "correct_option_id": correct_option_id,
-            "explanation": explanation
-        })
-
-    if not quizzes:
-        await update.message.reply_text("❌ Couldn’t parse any valid quiz. Make sure your format is correct.")
+    if not parsed_quizzes:
+        await update.message.reply_text("❌ Couldn’t parse any valid quiz. Check ✅ and Ex: format.")
         return
 
-    for quiz in quizzes:
+    # Send each parsed quiz as a separate poll
+    for quiz in parsed_quizzes:
         await context.bot.send_poll(
             chat_id=update.message.chat_id,
             question=quiz["question"],
@@ -94,7 +95,7 @@ async def handle_quiz_submission(update: Update, context: ContextTypes.DEFAULT_T
             is_anonymous=is_anonymous
         )
 
-# Main function
+# Main function to start the bot
 def main():
     token = os.getenv("TOKEN")
     if not token:
