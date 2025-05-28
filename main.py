@@ -1,55 +1,96 @@
-from telegram import Update, Poll
-from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
-import os
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    CallbackQueryHandler,
+    CallbackContext,
+)
+import logging
 
-TOKEN = os.getenv("TOKEN")
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-def parse_quiz(text):
-    lines = text.strip().split("\n")
-    question = lines[0].strip()
-    options = []
-    correct_index = -1
-    explanation = ""
+# Replace with your bot token
+TOKEN = "8014250953:AAHQ2YZs3IJHPgZCY-ZsHH9CSrYRf30ZK_kE"
 
-    for line in lines[1:]:
-        line = line.strip()
-        if line.startswith("Ex:"):
-            explanation = line
-            continue
-        if "✅" in line:
-            clean_line = line.replace("✅", "").strip()
-            options.append(clean_line)
-            correct_index = len(options) - 1
-        else:
-            options.append(line.strip())
+# Sample quiz questions
+standard_questions = [
+    {
+        "question": "What is the capital of France?",
+        "options": ["Berlin", "Paris", "Rome", "Madrid"],
+        "correct_option_id": 1
+    }
+]
 
-    return question, options, correct_index, explanation
+anonymous_questions = [
+    {
+        "question": "Which planet is known as the Red Planet?",
+        "options": ["Earth", "Mars", "Jupiter", "Saturn"],
+        "correct_option_id": 1
+    }
+]
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    question, options, correct_index, explanation = parse_quiz(text)
+# Start command with menu
+def start(update: Update, context: CallbackContext):
+    keyboard = [
+        [InlineKeyboardButton("Standard Quiz", callback_data='standard')],
+        [InlineKeyboardButton("Anonymous Quiz", callback_data='anonymous')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text("Choose a quiz mode:", reply_markup=reply_markup)
 
-    if correct_index == -1:
-        await update.message.reply_text("❌ No correct answer found (✅ missing).")
-        return
+# Handle button selection
+def button(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
 
-    await update.message.reply_poll(
-        question=question,
-        options=options,
-        type=Poll.QUIZ,
-        correct_option_id=correct_index,
-        explanation=explanation,
+    if query.data == "standard":
+        send_standard_quiz(query, context)
+    elif query.data == "anonymous":
+        send_anonymous_quiz(query, context)
+
+# Standard quiz logic
+def send_standard_quiz(query, context: CallbackContext):
+    question = standard_questions[0]
+    context.bot.send_poll(
+        chat_id=query.message.chat_id,
+        question=question["question"],
+        options=question["options"],
+        type='quiz',
+        correct_option_id=question["correct_option_id"],
         is_anonymous=False
     )
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send your quiz with ✅ on the correct option!")
+# Anonymous quiz logic
+def send_anonymous_quiz(query, context: CallbackContext):
+    question = anonymous_questions[0]
+    context.bot.send_poll(
+        chat_id=query.message.chat_id,
+        question=question["question"],
+        options=question["options"],
+        type='quiz',
+        correct_option_id=question["correct_option_id"],
+        is_anonymous=True
+    )
+
+# Error logging
+def error(update: Update, context: CallbackContext):
+    logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-if __name__ == "__main__":
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CallbackQueryHandler(button))
+    dp.add_error_handler(error)
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
     main()
