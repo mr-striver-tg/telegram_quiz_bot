@@ -6,48 +6,49 @@ from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filte
 from dotenv import load_dotenv
 
 load_dotenv()
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("TOKEN")  # Make sure this matches your .env variable
 
-# Parses quiz blocks with ✅ marked correct answers
-def parse_quiz_blocks(text: str):
-    questions = []
+def parse_quiz_blocks(text):
     blocks = text.strip().split('\n\n')
+    quizzes = []
+
     for block in blocks:
         lines = block.strip().split('\n')
-        if len(lines) < 3:
+        if len(lines) < 6:
             continue
-        question = lines[0].strip()
+
+        question = lines[0]
         options = []
         correct_option_id = -1
-        explanation = ''
-        for i, line in enumerate(lines[1:]):
-            if line.startswith("Ex:"):
-                explanation = line.strip()
-                break
-            option_text = line.replace("️", "").replace("✅", "").strip()
-            options.append(option_text)
-            if "✅" in line:
-                correct_option_id = len(options) - 1
-        if correct_option_id == -1 or len(options) < 2:
-            continue
-        questions.append({
+
+        for idx, line in enumerate(lines[1:5]):
+            opt = line.replace("️", "").strip()
+            if "✅" in opt:
+                opt = opt.replace("✅", "").strip()
+                correct_option_id = idx
+            options.append(opt)
+
+        explanation_line = next((line for line in lines if line.startswith("Ex:")), "Ex: No explanation")
+
+        quizzes.append({
             "question": question,
             "options": options,
             "correct_option_id": correct_option_id,
-            "explanation": explanation
+            "explanation": explanation_line
         })
-    return questions
 
-# Main handler for processing incoming messages
+    return quizzes
+
+
 async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    quizzes = parse_quiz_blocks(text)
+    quiz_list = parse_quiz_blocks(text)
 
-    if len(quizzes) < 1 or len(quizzes) > 15:
-        await update.message.reply_text("❌ Please send between 1 and 15 quiz questions.")
+    if not quiz_list:
+        await update.message.reply_text("❌ Could not parse any quizzes.")
         return
 
-    for quiz in quizzes:
+    for quiz in quiz_list[:15]:  # limit to 15
         await context.bot.send_poll(
             chat_id=update.effective_chat.id,
             question=quiz["question"],
@@ -57,9 +58,8 @@ async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             explanation=quiz["explanation"],
             is_anonymous=False
         )
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(2)
 
-# Entry point
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), quiz_handler))
